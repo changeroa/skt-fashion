@@ -1,0 +1,22 @@
+[
+  {
+    "product_id": "OWN-001",
+    "label": "자체 디자인 네이비 맨투맨",
+    "category": "top",
+    "color_family": "navy",
+    "product_type": "맨투맨",
+    "age_group": "adult",
+    "sample_unit_price_krw": 39000,
+    "image": "navy.svg"
+  },
+  {
+    "product_id": "OWN-002",
+    "label": "자체 디자인 크림 맨투맨",
+    "category": "top",
+    "color_family": "cream",
+    "product_type": "맨투맨",
+    "age_group": "adult",
+    "sample_unit_price_krw": 42000,
+    "image": "cream.svg"
+  }
+]

@@ -1,0 +1,15 @@
+node_modules/
+.env*
+!.env.example
+.local/
+demo/
+profile/
+ff-data/
+*.jpg
+*.jpeg
+*.png
+*.webp
+*.zip
+*.key
+*.log
+.DS_Store

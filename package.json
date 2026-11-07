@@ -1,0 +1,20 @@
+{
+  "name": "skt-fashion",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "fashion": "bun src/cli.ts",
+    "demo": "bun src/demo.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "ky": "^1.14.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.0",
+    "typescript": "^5.9.0"
+  }
+}
