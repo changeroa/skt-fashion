@@ -1,5 +1,6 @@
 import { join, resolve, sep } from "node:path";
 import { z } from "zod";
+import { fabricAdvice, fabricSchema } from "./fabric";
 
 export class FashionError extends Error {
   constructor(
@@ -22,6 +23,7 @@ export const productSchema = z.object({
   age_group: z.enum(["adult", "kids"]),
   sample_unit_price_krw: z.number().int().nonnegative(),
   image: z.string(),
+  fabric: fabricSchema.optional(),
 });
 export type Product = Readonly<z.infer<typeof productSchema>>;
 export type Catalog = {
@@ -60,24 +62,115 @@ export async function loadCatalog(source: Catalog["source"]): Promise<Catalog> {
   return { source, root, products, asOf };
 }
 
+const searchAliases = [
+  ["바람막이", "windbreaker", "windbreakers", "jacket", "jackets", "재킷", "자켓"],
+  ["맨투맨", "sweatshirt", "sweatshirts"],
+  ["후드", "후드티", "hoodie", "hoodies"],
+  ["티셔츠", "tshirt", "tshirts", "티"],
+  ["바지", "pants", "trousers"],
+  ["니트", "knit", "knitwear"],
+  ["패딩", "puffer"],
+  ["엠엘비", "mlb"],
+  ["디스커버리", "discovery"],
+  ["에프앤에프", "f&f", "fnf"],
+] as const;
+
+function searchTokens(value: string): readonly string[] {
+  return value
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/t-shirts?/g, "tshirt")
+    .replace(/f\s*&\s*f/g, "f&f")
+    .split(/[^\p{L}\p{N}&-]+/u)
+    .filter(Boolean)
+    .map((token) => searchAliases.find((aliases) => aliases.some((alias) => alias === token))?.[0] ?? token);
+}
+
 export function searchCatalog(
   catalog: Catalog,
   input: { readonly budget: number; readonly category?: string; readonly item?: string },
 ) {
   const budget = z.number().finite().nonnegative().parse(input.budget);
-  const matches = catalog.products
-    .filter(
-      (p) =>
-        p.age_group === "adult" &&
-        p.sample_unit_price_krw <= budget &&
-        (!input.category || p.category === input.category || p.product_type === input.category) &&
-        (!input.item ||
-          p.product_id === input.item ||
-          p.label.includes(input.item) ||
-          p.product_type.includes(input.item)),
-    )
+  const categoryTokens = searchTokens(input.category ?? "");
+  const itemTokens = searchTokens(input.item ?? "");
+  const queryTokens = [...categoryTokens, ...itemTokens];
+  const sourceRequested = queryTokens.includes("에프앤에프");
+  const ffBrandRequested = queryTokens.some((token) =>
+    ["에프앤에프", "엠엘비", "디스커버리"].includes(token),
+  );
+  // Provenance is a catalog property, not a label match or a fallback catalog.
+  const sourceMatches = catalog.source === "F&F sample" || !ffBrandRequested;
+  const adults = catalog.products.filter((p) => p.age_group === "adult");
+  const indexed = adults.map((product) => ({
+    product,
+    types: searchTokens(`${product.category} ${product.product_type}`),
+    tokens: searchTokens(
+      `${product.product_id} ${product.label} ${product.category} ${product.product_type} ${product.color_family}`,
+    ),
+  }));
+  const exact = indexed.filter(({ tokens, types }) =>
+    sourceMatches &&
+    categoryTokens.every((token) =>
+      token === "에프앤에프" ? sourceMatches : types.includes(token),
+    ) &&
+    itemTokens.every((token) =>
+      token === "에프앤에프" ? sourceMatches : tokens.includes(token),
+    ),
+  );
+  const matches = exact
+    .map(({ product }) => product)
+    .filter((p) => p.sample_unit_price_krw <= budget)
     .toSorted((a, b) => a.sample_unit_price_krw - b.sample_unit_price_krw);
+  const availability = matches.length
+    ? "found"
+    : exact.length
+      ? "over_budget"
+      : "not_in_catalog";
+  const alternatives = matches.length || !sourceMatches
+    ? []
+    : indexed
+      .filter(({ product }) => product.sample_unit_price_krw <= budget)
+      .map(({ product, tokens, types }) => ({
+        product,
+        score: queryTokens.reduce(
+          (score, token) => score + (types.includes(token) ? 4 : tokens.includes(token) ? 1 : 0),
+          0,
+        ),
+      }))
+      .toSorted((a, b) =>
+        b.score - a.score || a.product.sample_unit_price_krw - b.product.sample_unit_price_krw,
+      )
+      .slice(0, 3)
+      .map(({ product }) => product);
+  const nextSteps = matches.length
+    ? [
+        { action: "select_candidate", label: "상품 선택" },
+        { action: "change_item", label: "다른 상품 검색" },
+        { action: "stop", label: "종료" },
+      ]
+    : [
+        ...(alternatives.length ? [{ action: "view_alternatives", label: "가까운 대안 보기" }] : []),
+        availability === "over_budget"
+          ? {
+              action: "adjust_budget",
+              label: "예산 조정",
+              minimumBudget: Math.min(...exact.map(({ product }) => product.sample_unit_price_krw)),
+            }
+          : { action: "change_item", label: sourceRequested ? "F&F 카탈로그·검색어 확인" : "검색어 변경" },
+        { action: "stop", label: "종료" },
+      ];
   return {
+    summary: matches.length
+      ? `예산 내 성인 일치 상품 ${matches.length}개입니다.`
+      : `${availability === "over_budget"
+          ? "이 카탈로그의 요청 상품은 예산을 초과합니다."
+          : "요청 상품은 이 카탈로그에 없습니다."} ${alternatives.length
+          ? `예산 내 가까운 성인 대안 ${alternatives.length}개입니다.`
+          : "예산 내 성인 대안도 없습니다."}`,
+    candidates: matches.slice(0, 3),
+    alternatives,
+    availability,
+    nextSteps,
     source: catalog.source,
     asOf: catalog.asOf,
     status: matches.length ? "found" : "empty",
@@ -85,7 +178,6 @@ export function searchCatalog(
     priceBasis: "sample_reference",
     finalTotalKnown: false,
     matchedCount: matches.length,
-    candidates: matches.slice(0, 3),
     notice:
       catalog.source === "F&F sample"
         ? "F&F 정적 샘플 참고가격입니다. 실제 판매가·할인·총 결제액이 아닙니다."
@@ -101,7 +193,13 @@ export function findProduct(catalog: Catalog, sku: SKU): Product {
 
 export function priceCard(catalog: Catalog, sku: SKU, budget?: number) {
   const product = findProduct(catalog, sku);
+  const fabric = fabricAdvice({ fabric: product.fabric });
   return {
+    summary: `${product.label} · 참고가격 ${product.sample_unit_price_krw.toLocaleString("ko-KR")}원`,
+    image: localAsset(catalog.root, product.image),
+    fabricOpinion: fabric.valueOpinion,
+    fabricBasis: fabric.basis,
+    fabricRuleIds: fabric.ruleIds,
     card: "price",
     source: catalog.source,
     asOf: catalog.asOf,

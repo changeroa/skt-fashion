@@ -61,6 +61,7 @@ describe("catalog", () => {
 
 const quotePayload: Omit<Quote, "digest"> = {
   id: "0980c30a-1df1-4407-890d-12ec1680540e",
+  approvalCode: "1001",
   sku,
   source: "F&F sample",
   referencePriceKrw: 70000,

@@ -1,10 +1,13 @@
 import { parseArgs } from "node:util";
+import { join } from "node:path";
 import { z } from "zod";
 import { koreanExplanation } from "./ax";
-import { FashionError, loadCatalog, priceCard, searchCatalog, skuSchema } from "./catalog";
+import { FashionError, loadCatalog, priceCard, privateHome, searchCatalog, skuSchema } from "./catalog";
 import { approveAndPay, createQuote } from "./payment";
 import { fitCard } from "./profile";
 import { tryon } from "./tryon";
+import { clearSelection } from "./selection";
+import { sessionLimits } from "./presentation";
 
 const { positionals, values } = parseArgs({
   args: Bun.argv.slice(2),
@@ -22,11 +25,16 @@ const { positionals, values } = parseArgs({
     fit: { type: "string" },
     option: { type: "string" },
     cancel: { type: "boolean", default: false },
+    actor: { type: "string", default: "user" },
+    session: { type: "string" },
+    observation: { type: "string" },
   },
 });
 
 async function main() {
   const command = positionals[0];
+  const actor = z.enum(["user", "scripted-demo"]).parse(values.actor);
+  if (command === "change_selection") return clearSelection(actor);
   if (command === "explain") {
     return koreanExplanation(z.string().min(1).parse(values.request));
   }
@@ -41,10 +49,17 @@ async function main() {
   }
   const sku = skuSchema.parse(values.sku);
   switch (command) {
-    case "price_card":
-      return priceCard(catalog, sku, values.budget === undefined ? undefined : z.coerce.number().finite().nonnegative().parse(values.budget));
+    case "price_card": {
+      const price = priceCard(catalog, sku, values.budget === undefined ? undefined : z.coerce.number().finite().nonnegative().parse(values.budget));
+      const observation = values.observation ?? join(privateHome(), `demo/${sku}.style.json`);
+      if (await Bun.file(observation).exists()) {
+        const fit = await fitCard(catalog, sku, observation);
+        return { ...price, fabricOpinion: fit.fabricValueOpinion, fabricBasis: fit.fabricBasis, fabricRuleIds: fit.fabricRuleIds };
+      }
+      return price;
+    }
     case "fit_card":
-      return fitCard(catalog, sku);
+      return fitCard(catalog, sku, values.observation);
     case "tryon":
       return tryon(catalog, sku);
     case "quote":
@@ -52,7 +67,7 @@ async function main() {
         price: z.literal("accepted").parse(values.price),
         fit: z.literal("accepted-with-unknown-size").parse(values.fit),
         option: z.string().min(1).parse(values.option),
-        actor: "user",
+        actor,
       });
     case "approve_and_pay":
       return approveAndPay(catalog, sku, {
@@ -66,7 +81,12 @@ async function main() {
 }
 
 try {
-  console.log(JSON.stringify(await main(), null, 2));
+  const result = await main();
+  const session = values.session ?? process.env["FASHION_SESSION"];
+  console.log(JSON.stringify({
+    ...result,
+    ...(session ? { sessionLimits: await sessionLimits(session) } : {}),
+  }, null, 2));
 } catch (error) {
   if (error instanceof FashionError) {
     console.error(JSON.stringify({ status: "error", code: error.code, message: error.message }));

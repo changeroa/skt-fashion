@@ -29,7 +29,7 @@ export async function koreanExplanation(request: string) {
             {
               role: "system",
               content:
-                '한국어 의류 요청에서 조건을 추출하고 판단 절차를 설명하세요. JSON {"filters":{"budget":숫자 또는 null,"category":문자열 또는 null,"item":문자열 또는 null},"explanation":문자열}만 반환하세요. 금액은 원 단위, 맨투맨은 category="top", item="맨투맨". 상품·가격·재고를 알 수 없으므로 만들지 마세요. 실제 가격·배송비·핏은 로컬 근거 확인 필요라고 설명하고 구매·보류 모두 제시하세요. 이미지를 보았다고 하지 마세요.',
+                '한국어 의류 요청의 검색 조건만 추출하세요. JSON {"filters":{"budget":숫자 또는 null,"category":문자열 또는 null,"item":문자열 또는 null},"explanation":문자열}만 반환하세요. 금액은 원 단위, 맨투맨은 category="top", item="맨투맨". explanation은 "조건에 맞는 로컬 후보를 확인할게요."처럼 다음 행동 한 문장만. 상품·가격·재고를 만들거나 추천 불가능·직접 확인 같은 제한을 반복하지 마세요. 이미지를 보았다고 하지 마세요.',
             },
             { role: "user", content: request },
           ],
